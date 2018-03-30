@@ -4,17 +4,15 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	fsnotify "gopkg.in/fsnotify.v1"
 )
 
 var volumeDirs volumeDirsFlag
-var webhook = flag.String("webhook-url", "", "the url to send a request to when the specified config map volume directory has been updated")
-var webhookMethod = flag.String("webhook-method", "POST", "the HTTP method url to use to send the webhook")
-var webhookStatusCode = flag.Int("webhook-status-code", 200, "the HTTP status code indicating successful triggering of reload")
+var command []string
 
 func main() {
 	flag.Var(&volumeDirs, "volume-dir", "the config map volume directory to watch for updates; may be used multiple times")
@@ -26,11 +24,10 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
-	if *webhook == "" {
-		log.Println("Missing webhook")
-		log.Println()
-		flag.Usage()
-		os.Exit(1)
+
+	command = flag.Args()
+	if len(command) == 0 {
+		log.Fatalf("A command argument is required.")
 	}
 
 	watcher, err := fsnotify.NewWatcher()
@@ -47,21 +44,7 @@ func main() {
 				if event.Op&fsnotify.Create == fsnotify.Create {
 					if filepath.Base(event.Name) == "..data" {
 						log.Println("config map updated")
-						req, err := http.NewRequest(*webhookMethod, *webhook, nil)
-						if err != nil {
-							log.Println("error:", err)
-							continue
-						}
-						resp, err := http.DefaultClient.Do(req)
-						if err != nil {
-							log.Println("error:", err)
-							continue
-						}
-						resp.Body.Close()
-						if resp.StatusCode != *webhookStatusCode {
-							log.Println("error:", "Received response code", resp.StatusCode, ", expected", *webhookStatusCode)
-							continue
-						}
+						run(command)
 						log.Println("successfully triggered reload")
 					}
 				}
@@ -90,4 +73,11 @@ func (v *volumeDirsFlag) Set(value string) error {
 
 func (v *volumeDirsFlag) String() string {
 	return fmt.Sprint(*v)
+}
+
+func run(command []string) error {
+	cmd := exec.Command(command[0], command[1:]...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
